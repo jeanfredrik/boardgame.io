@@ -6,7 +6,12 @@
  * https://opensource.org/licenses/MIT.
  */
 
-import { TurnOrder } from './turn-order';
+import {
+  SetActionPlayers,
+  InitTurnOrderState,
+  UpdateTurnOrderState,
+  TurnOrder,
+} from './turn-order';
 import { Random } from './random';
 import { Events } from './events';
 import { automaticGameEvent } from './action-creators';
@@ -69,11 +74,10 @@ export function Flow({
     const { payload } = action;
     if (events.hasOwnProperty(payload.type)) {
       const context = { playerID: payload.playerID, dispatch };
+      const deltalog = [...(state.deltalog || []), action];
+      state = { ...state, deltalog };
       const args = [state].concat(payload.args);
-      const oldLog = state.log || [];
-      const log = [...oldLog, action];
-      const newState = events[payload.type].apply(context, args);
-      return { ...newState, log };
+      return events[payload.type].apply(context, args);
     }
     return state;
   };
@@ -95,9 +99,13 @@ export function Flow({
 
     optimisticUpdate,
 
+    canPlayerCallEvent: (G, ctx, playerID) => {
+      return ctx.currentPlayer == playerID;
+    },
+
     canPlayerMakeMove: (G, ctx, playerID) => {
       const actionPlayers = ctx.actionPlayers || [];
-      return actionPlayers.includes(playerID) || actionPlayers.includes('any');
+      return actionPlayers.includes(playerID);
     },
 
     canMakeMove: (G, ctx, moveName) => {
@@ -153,7 +161,7 @@ export function Flow({
  *
  * @param {...object} endGame - Set to true to enable the `endGame` event.
  *
- * @param {...object} changeActionPlayers - Set to true to enable the `changeActionPlayers` event.
+ * @param {...object} setActionPlayers - Set to true to enable the `setActionPlayers` event.
  *
  * @param {...object} allowedMoves - List of moves that are allowed.
  *                                   This can be either a list of
@@ -238,7 +246,7 @@ export function FlowWithPhases({
   endTurn,
   endPhase,
   endGame,
-  changeActionPlayers,
+  setActionPlayers,
   undoableMoves,
   allowedMoves,
   optimisticUpdate,
@@ -253,8 +261,8 @@ export function FlowWithPhases({
   if (endGame === undefined) {
     endGame = false;
   }
-  if (changeActionPlayers === undefined) {
-    changeActionPlayers = false;
+  if (setActionPlayers === undefined) {
+    setActionPlayers = false;
   }
   if (optimisticUpdate === undefined) {
     optimisticUpdate = () => true;
@@ -326,30 +334,31 @@ export function FlowWithPhases({
 
   const shouldEndTurn = ({ G, ctx }) => {
     const conf = phaseMap[ctx.phase];
-    if (conf.movesPerTurn && ctx.currentPlayerMoves >= conf.movesPerTurn) {
+
+    const currentPlayerMoves = ctx.stats.turn.numMoves[ctx.currentPlayer] || 0;
+    if (conf.movesPerTurn && currentPlayerMoves >= conf.movesPerTurn) {
       return true;
     }
     return conf.endTurnIf(G, ctx);
   };
 
-  const getCurrentPlayer = (playOrder, playOrderPos) => {
-    if (playOrderPos === undefined) {
-      return 'any';
-    }
-    return playOrder[playOrderPos] + '';
-  };
-
   // Helper to perform start-of-phase initialization.
   const startPhase = function(state, config) {
     const G = config.onPhaseBegin(state.G, state.ctx);
+    const ctx = InitTurnOrderState(state.G, state.ctx, config.turnOrder);
 
-    const ctx = { ...state.ctx };
-    ctx.playOrderPos = config.turnOrder.first(G, ctx);
-    ctx.currentPlayer = getCurrentPlayer(ctx.playOrder, ctx.playOrderPos);
-    ctx.actionPlayers = [ctx.currentPlayer];
-    ctx.allowedMoves = config.allowedMoves(G, ctx);
+    // Reset stats.
+    ctx.stats = {
+      ...ctx.stats,
+      phase: {
+        ...ctx.stats.phase,
+        numMoves: {},
+        allPlayed: false,
+      },
+    };
 
-    return { ...state, G, ctx };
+    const allowedMoves = config.allowedMoves(G, ctx);
+    return { ...state, G, ctx: { ...ctx, allowedMoves } };
   };
 
   const startTurn = function(state, config) {
@@ -362,6 +371,16 @@ export function FlowWithPhases({
 
     const ctx = { ...state.ctx };
     ctx.allowedMoves = config.allowedMoves(G, ctx);
+
+    // Reset stats.
+    ctx.stats = {
+      ...ctx.stats,
+      turn: {
+        ...ctx.stats.turn,
+        numMoves: {},
+        allPlayed: false,
+      },
+    };
 
     return { ...state, G, ctx, _undo, _redo: [] };
   };
@@ -449,7 +468,8 @@ export function FlowWithPhases({
     const conf = phaseMap[ctx.phase];
 
     // Prevent ending the turn if movesPerTurn haven't been made.
-    if (conf.movesPerTurn && ctx.currentPlayerMoves < conf.movesPerTurn) {
+    const currentPlayerMoves = ctx.stats.turn.numMoves[ctx.currentPlayer] || 0;
+    if (conf.movesPerTurn && currentPlayerMoves < conf.movesPerTurn) {
       return state;
     }
 
@@ -462,39 +482,36 @@ export function FlowWithPhases({
       return { ...state, G, ctx: { ...ctx, gameover } };
     }
 
-    // Update current player.
-    let playOrderPos = ctx.playOrderPos;
-    let currentPlayer = ctx.currentPlayer;
-    if (nextPlayer === 'any') {
-      playOrderPos = undefined;
-      currentPlayer = nextPlayer;
-    } else if (ctx.playOrder.includes(nextPlayer)) {
-      playOrderPos = ctx.playOrder.indexOf(nextPlayer);
-      currentPlayer = nextPlayer;
-    } else {
-      playOrderPos = conf.turnOrder.next(G, ctx);
-      currentPlayer = getCurrentPlayer(ctx.playOrder, playOrderPos);
+    let endPhase = false;
+
+    // Update turn order state.
+    {
+      const { endPhase: a, ctx: b } = UpdateTurnOrderState(
+        G,
+        ctx,
+        conf.turnOrder,
+        nextPlayer
+      );
+      endPhase = a;
+      ctx = b;
     }
 
-    const actionPlayers = [currentPlayer];
     // Update turn.
     const turn = ctx.turn + 1;
+
     // Update state.
-    ctx = {
-      ...ctx,
-      playOrderPos,
-      currentPlayer,
-      actionPlayers,
-      turn,
-      currentPlayerMoves: 0,
-    };
+    ctx = { ...ctx, turn };
 
     // End phase if condition is met.
-    const end = shouldEndPhase(state);
-    if (end) {
+    const endPhaseArg = shouldEndPhase(state);
+    if (endPhaseArg) {
+      endPhase = true;
+    }
+
+    if (endPhase) {
       return this.dispatch(
         { ...state, G, ctx },
-        automaticGameEvent('endPhase', [end], this.playerID)
+        automaticGameEvent('endPhase', [endPhaseArg], this.playerID)
       );
     }
 
@@ -509,20 +526,40 @@ export function FlowWithPhases({
     return { ...state, ctx: { ...state.ctx, gameover: arg } };
   }
 
-  function changeActionPlayersEvent(state, actionPlayers) {
-    if (actionPlayers && actionPlayers.length) {
-      return { ...state, ctx: { ...state.ctx, actionPlayers } };
+  function updateStats(state, key, playerID) {
+    const moves = (state.ctx.stats[key].numMoves[playerID] || 0) + 1;
+    const numMoves = { ...state.ctx.stats[key].numMoves, [playerID]: moves };
+    const t = { ...state.ctx.stats[key], numMoves };
+
+    if (Object.keys(numMoves).length == state.ctx.numPlayers) {
+      t.allPlayed = true;
     }
-    return state;
+
+    const stats = { ...state.ctx.stats, [key]: t };
+    const ctx = { ...state.ctx, stats };
+
+    return { ...state, ctx };
   }
 
   function processMove(state, action, dispatch) {
     let conf = phaseMap[state.ctx.phase];
 
-    const currentPlayerMoves = state.ctx.currentPlayerMoves + 1;
+    state = updateStats(state, 'turn', action.playerID);
+    state = updateStats(state, 'phase', action.playerID);
+
+    // Update actionPlayers if _actionPlayersOnce is set.
+    let actionPlayers = state.ctx.actionPlayers;
+    if (state.ctx._actionPlayersOnce == true) {
+      const playerID = action.playerID;
+      actionPlayers = actionPlayers.filter(id => id !== playerID);
+    }
+
     state = {
       ...state,
-      ctx: { ...state.ctx, currentPlayerMoves },
+      ctx: {
+        ...state.ctx,
+        actionPlayers,
+      },
     };
 
     const G = conf.onMove(state.G, state.ctx, action);
@@ -564,7 +601,7 @@ export function FlowWithPhases({
     // Update undo / redo state.
     if (!endTurn) {
       const undo = state._undo || [];
-      const moveType = action.payload.type;
+      const moveType = action.type;
 
       let plainCtx = state.ctx;
       plainCtx = Random.detach(plainCtx);
@@ -603,8 +640,8 @@ export function FlowWithPhases({
   if (endGame) {
     enabledEvents['endGame'] = endGameEvent;
   }
-  if (changeActionPlayers) {
-    enabledEvents['changeActionPlayers'] = changeActionPlayersEvent;
+  if (setActionPlayers) {
+    enabledEvents['setActionPlayers'] = SetActionPlayers;
   }
 
   return Flow({
@@ -615,6 +652,8 @@ export function FlowWithPhases({
       currentPlayerMoves: 0,
       playOrder: Array.from(Array(numPlayers), (d, i) => i + ''),
       playOrderPos: 0,
+      stats: { turn: { numMoves: {} }, phase: { numMoves: {} } },
+      allPlayed: false,
       phase: phases[0].name,
     }),
     init: state => {

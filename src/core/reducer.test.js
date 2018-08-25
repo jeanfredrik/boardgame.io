@@ -11,7 +11,8 @@ import { CreateGameReducer } from './reducer';
 import {
   makeMove,
   gameEvent,
-  restore,
+  sync,
+  update,
   reset,
   undo,
   redo,
@@ -83,6 +84,10 @@ test('disable move by invalid playerIDs', () => {
   state = reducer(state, makeMove('A', null, '1'));
   expect(state._stateID).toBe(0);
 
+  // playerID="1" cannot call events right now.
+  state = reducer(state, gameEvent('endTurn', null, '1'));
+  expect(state._stateID).toBe(0);
+
   // playerID="0" can move.
   state = reducer(state, makeMove('A', null, '0'));
   expect(state._stateID).toBe(1);
@@ -92,9 +97,15 @@ test('disable move by invalid playerIDs', () => {
   expect(state._stateID).toBe(2);
 });
 
-test('restore', () => {
+test('sync', () => {
   const reducer = CreateGameReducer({ game });
-  const state = reducer(undefined, restore({ G: 'restored' }));
+  const state = reducer(undefined, sync({ G: 'restored' }));
+  expect(state).toEqual({ G: 'restored' });
+});
+
+test('update', () => {
+  const reducer = CreateGameReducer({ game });
+  const state = reducer(undefined, update({ G: 'restored' }));
   expect(state).toEqual({ G: 'restored' });
 });
 
@@ -188,7 +199,7 @@ test('numPlayers', () => {
   expect(state.ctx.numPlayers).toBe(4);
 });
 
-test('log', () => {
+test('deltalog', () => {
   const reducer = CreateGameReducer({ game });
 
   let state = undefined;
@@ -198,11 +209,11 @@ test('log', () => {
   const actionC = gameEvent('endTurn');
 
   state = reducer(state, actionA);
-  expect(state.log).toEqual([actionA]);
+  expect(state.deltalog).toEqual([actionA]);
   state = reducer(state, actionB);
-  expect(state.log).toEqual([actionA, actionB]);
+  expect(state.deltalog).toEqual([actionB]);
   state = reducer(state, actionC);
-  expect(state.log).toEqual([actionA, actionB, actionC]);
+  expect(state.deltalog).toEqual([actionC]);
 });
 
 describe('Random inside setup()', () => {
@@ -244,6 +255,22 @@ describe('Random inside setup()', () => {
     const state = reducer(undefined, makeMove());
     expect(state.ctx._random.seed).toBeDefined();
   });
+});
+
+test('events API inside first onTurnBegin', () => {
+  const game = Game({
+    flow: {
+      setActionPlayers: true,
+      onTurnBegin: (G, ctx) => {
+        ctx.events.setActionPlayers(['0', '1']);
+      },
+    },
+  });
+
+  const reducer = CreateGameReducer({ game });
+  const state = reducer(undefined, { type: 'init' });
+
+  expect(state.ctx.actionPlayers).toEqual(['0', '1']);
 });
 
 test('undo / redo', () => {

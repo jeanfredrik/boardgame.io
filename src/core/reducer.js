@@ -42,10 +42,6 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
     // Framework managed state.
     ctx: ctx,
 
-    // A list of actions performed so far. Used by the
-    // GameLog to display a journal of moves.
-    log: [],
-
     // List of {G, ctx} pairs that can be undone.
     _undo: [],
 
@@ -67,9 +63,11 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
 
   const state = game.flow.init({ G: initial.G, ctx: ctxWithAPI });
 
+  const { ctx: ctxWithEvents } = events.update(state);
   initial.G = state.G;
   initial._undo = state._undo;
-  initial.ctx = random.update(state.ctx);
+  initial.ctx = ctxWithEvents;
+  initial.ctx = random.update(initial.ctx);
   initial.ctx = Random.detach(initial.ctx);
   initial.ctx = Events.detach(initial.ctx);
 
@@ -93,6 +91,21 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
         if (multiplayer) {
           return state;
         }
+
+        // Ignore the event if the player isn't allowed to make it.
+        if (
+          action.payload.playerID !== null &&
+          action.payload.playerID !== undefined &&
+          !game.flow.canPlayerCallEvent(
+            state.G,
+            state.ctx,
+            action.payload.playerID
+          )
+        ) {
+          return state;
+        }
+
+        state = { ...state, deltalog: undefined };
 
         // Initialize PRNG from ctx.
         const random = new Random(state.ctx);
@@ -128,7 +141,7 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
           return state;
         }
 
-        // Ignore the move if the player cannot make it at this point.
+        // Ignore the move if the player isn't allowed to make it.
         if (
           action.payload.playerID !== null &&
           action.payload.playerID !== undefined &&
@@ -140,6 +153,8 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
         ) {
           return state;
         }
+
+        state = { ...state, deltalog: undefined };
 
         // Initialize PRNG from ctx.
         const random = new Random(state.ctx);
@@ -172,8 +187,8 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
           G = state.G;
         }
 
-        const log = [...state.log, action];
-        state = { ...state, G, ctx, log, _stateID: state._stateID + 1 };
+        const deltalog = [action];
+        state = { ...state, G, ctx, deltalog, _stateID: state._stateID + 1 };
 
         // If we're on the client, just process the move
         // and no triggers in multiplayer mode.
@@ -186,7 +201,7 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
         // Allow the flow reducer to process any triggers that happen after moves.
         state = { ...state, ctx: random.attach(state.ctx) };
         state = { ...state, ctx: events.attach(state.ctx) };
-        state = game.flow.processMove(state, action);
+        state = game.flow.processMove(state, action.payload);
         state = events.update(state);
         state = { ...state, ctx: random.update(state.ctx) };
         state = { ...state, ctx: Random.detach(state.ctx) };
@@ -195,7 +210,8 @@ export function CreateGameReducer({ game, numPlayers, multiplayer }) {
         return state;
       }
 
-      case Actions.RESTORE: {
+      case Actions.UPDATE:
+      case Actions.SYNC: {
         return action.state;
       }
 

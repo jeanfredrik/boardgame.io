@@ -69,8 +69,6 @@ test('board props', () => {
     board: TestBoard,
     multiplayer: true,
   });
-  board = Enzyme.mount(<Board />).find(TestBoard);
-  expect(board.props().isActive).toBe(true);
   board = Enzyme.mount(<Board playerID={'0'} />).find(TestBoard);
   expect(board.props().isActive).toBe(true);
   board = Enzyme.mount(<Board playerID={'1'} />).find(TestBoard);
@@ -199,19 +197,9 @@ test('local playerView', () => {
     numPlayers: 2,
   });
 
-  {
-    const game = Enzyme.mount(<Board />);
-    const board = game.find('TestBoard').instance();
-    expect(board.props.G).toEqual({ stripped: '0' });
-    board.props.events.endTurn();
-    expect(board.props.G).toEqual({ stripped: '1' });
-  }
-
-  {
-    const game = Enzyme.mount(<Board playerID="1" />);
-    const board = game.find('TestBoard').instance();
-    expect(board.props.G).toEqual({ stripped: '1' });
-  }
+  const game = Enzyme.mount(<Board playerID="1" />);
+  const board = game.find('TestBoard').instance();
+  expect(board.props.G).toEqual({ stripped: '1' });
 });
 
 test('reset Game', () => {

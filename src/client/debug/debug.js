@@ -15,9 +15,22 @@ import { Controls } from './controls';
 import { PlayerInfo } from './playerinfo';
 import { DebugMove } from './debug-move';
 import { GameLog } from '../log/log';
-import { restore } from '../../core/action-creators';
+import { sync } from '../../core/action-creators';
 import { parse, stringify } from 'flatted';
 import './debug.css';
+
+/**
+ * Removes all the keys in ctx that begin with a _.
+ */
+function SanitizeCtx(ctx) {
+  let r = {};
+  for (const key in ctx) {
+    if (!key.startsWith('_')) {
+      r[key] = ctx[key];
+    }
+  }
+  return r;
+}
 
 /**
  * Debug
@@ -111,7 +124,7 @@ export class Debug extends React.Component {
     const gamestateJSON = window.localStorage.getItem('gamestate');
     if (gamestateJSON !== null) {
       const gamestate = parse(gamestateJSON);
-      this.props.store.dispatch(restore(gamestate));
+      this.props.store.dispatch(sync(gamestate));
     }
   };
 
@@ -238,15 +251,19 @@ export class Debug extends React.Component {
 
               <section>
                 <pre className="json">
-                  <strong>ctx</strong>:{' '}
-                  {JSON.stringify(this.props.gamestate.ctx, null, 2)}
+                  <strong>G</strong>:{' '}
+                  {JSON.stringify(this.props.gamestate.G, null, 2)}
                 </pre>
               </section>
 
               <section>
                 <pre className="json">
-                  <strong>G</strong>:{' '}
-                  {JSON.stringify(this.props.gamestate.G, null, 2)}
+                  <strong>ctx</strong>:{' '}
+                  {JSON.stringify(
+                    SanitizeCtx(this.props.gamestate.ctx),
+                    null,
+                    2
+                  )}
                 </pre>
               </section>
             </span>
