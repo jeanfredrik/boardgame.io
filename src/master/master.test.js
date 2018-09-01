@@ -10,9 +10,15 @@ import Game from '../core/game';
 import * as ActionCreators from '../core/action-creators';
 import * as Redux from 'redux';
 import { InMemory } from '../server/db/inmemory';
-import { GameMaster } from './master';
+import { Master } from './master';
+import { error } from '../core/logger';
 
-const game = Game({ seed: 0 });
+jest.mock('../core/logger', () => ({
+  info: jest.fn(),
+  error: jest.fn(),
+}));
+
+const game = Game({ seed: 0, flow: { setActionPlayers: true } });
 
 function TransportAPI(send = jest.fn(), sendAll = jest.fn()) {
   return { send, sendAll };
@@ -20,7 +26,7 @@ function TransportAPI(send = jest.fn(), sendAll = jest.fn()) {
 
 describe('sync', async () => {
   const send = jest.fn();
-  const master = new GameMaster(game, new InMemory(), TransportAPI(send));
+  const master = new Master(game, new InMemory(), TransportAPI(send));
   const spy = jest.spyOn(Redux, 'createStore');
 
   beforeEach(() => {
@@ -55,11 +61,7 @@ describe('update', async () => {
   const sendAll = jest.fn(arg => {
     sendAllReturn = arg;
   });
-  const master = new GameMaster(
-    game,
-    new InMemory(),
-    TransportAPI(send, sendAll)
-  );
+  const master = new Master(game, new InMemory(), TransportAPI(send, sendAll));
   const action = ActionCreators.gameEvent('endTurn');
 
   beforeAll(async () => {
@@ -173,13 +175,15 @@ describe('update', async () => {
 
     expect(value.args[2]).toMatchObject([
       {
-        payload: {
-          args: undefined,
-          credentials: undefined,
-          playerID: undefined,
-          type: 'endTurn',
+        action: {
+          payload: {
+            args: undefined,
+            credentials: undefined,
+            playerID: undefined,
+            type: 'endTurn',
+          },
+          type: 'GAME_EVENT',
         },
-        type: 'GAME_EVENT',
       },
     ]);
   });
@@ -187,22 +191,42 @@ describe('update', async () => {
   test('invalid gameID', async () => {
     await master.onUpdate(action, 1, 'unknown', '1');
     expect(sendAll).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(`game not found, gameID=[unknown]`);
   });
 
   test('invalid stateID', async () => {
     await master.onUpdate(action, 100, 'gameID', '1');
     expect(sendAll).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      `invalid stateID, was=[100], expected=[1]`
+    );
   });
 
   test('invalid playerID', async () => {
     await master.onUpdate(action, 1, 'gameID', '100');
     await master.onUpdate(ActionCreators.makeMove(), 1, 'gameID', '100');
     expect(sendAll).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      `event not processed - invalid playerID=[100]`
+    );
   });
 
   test('valid gameID / stateID / playerID', async () => {
     await master.onUpdate(action, 1, 'gameID', '1');
     expect(sendAll).toHaveBeenCalled();
+  });
+
+  test('writes log when player is not an action player', async () => {
+    const setActionPlayersEvent = ActionCreators.gameEvent('setActionPlayers', [
+      '1',
+    ]);
+    await master.onUpdate(setActionPlayersEvent, 2, 'gameID', '0');
+
+    const move = ActionCreators.makeMove('move');
+    await master.onUpdate(move, 3, 'gameID', '0');
+    expect(error).toHaveBeenCalledWith(
+      `move not processed - canPlayerMakeMove=false, playerID=[0]`
+    );
   });
 });
 
@@ -221,11 +245,7 @@ describe('playerView', () => {
       return { ...G, player };
     },
   });
-  const master = new GameMaster(
-    game,
-    new InMemory(),
-    TransportAPI(send, sendAll)
-  );
+  const master = new Master(game, new InMemory(), TransportAPI(send, sendAll));
 
   beforeAll(async () => {
     await master.onSync('gameID', '0');
@@ -265,13 +285,13 @@ describe('authentication', async () => {
   const storage = new InMemory();
 
   beforeAll(async () => {
-    const master = new GameMaster(game, storage, TransportAPI());
+    const master = new Master(game, storage, TransportAPI());
     await master.onSync('gameID', '0');
   });
 
   test('auth failure', async () => {
     const isActionFromAuthenticPlayer = () => false;
-    const master = new GameMaster(
+    const master = new Master(
       game,
       storage,
       TransportAPI(send, sendAll),
@@ -283,7 +303,7 @@ describe('authentication', async () => {
 
   test('auth success', async () => {
     const isActionFromAuthenticPlayer = () => true;
-    const master = new GameMaster(
+    const master = new Master(
       game,
       storage,
       TransportAPI(send, sendAll),

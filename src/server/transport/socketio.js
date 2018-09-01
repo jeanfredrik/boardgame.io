@@ -6,7 +6,7 @@
  * https://opensource.org/licenses/MIT.
  */
 
-import { GameMaster } from '../../master/master';
+import { Master } from '../../master/master';
 import { isActionFromAuthenticPlayer } from '../api';
 const IO = require('koa-socket-2');
 
@@ -14,7 +14,7 @@ const PING_TIMEOUT = 20 * 1e3;
 const PING_INTERVAL = 10 * 1e3;
 
 /**
- * API that's exposed by SocketIO for the GameMaster to send
+ * API that's exposed by SocketIO for the Master to send
  * information to the clients.
  */
 export function TransportAPI(gameID, socket, clientInfo, roomInfo) {
@@ -80,7 +80,7 @@ export function SocketIO(_clientInfo, _roomInfo) {
 
         nsp.on('connection', socket => {
           socket.on('update', async (action, stateID, gameID, playerID) => {
-            const master = new GameMaster(
+            const master = new Master(
               game,
               app.context.db,
               TransportAPI(gameID, socket, clientInfo, roomInfo),
@@ -92,6 +92,12 @@ export function SocketIO(_clientInfo, _roomInfo) {
           socket.on('sync', async (gameID, playerID, numPlayers) => {
             socket.join(gameID);
 
+            // Remove client from any previous game that it was a part of.
+            if (clientInfo.has(socket.id)) {
+              const { gameID: oldGameID } = clientInfo.get(socket.id);
+              roomInfo.get(oldGameID).delete(socket.id);
+            }
+
             let roomClients = roomInfo.get(gameID);
             if (roomClients === undefined) {
               roomClients = new Set();
@@ -101,7 +107,7 @@ export function SocketIO(_clientInfo, _roomInfo) {
 
             clientInfo.set(socket.id, { gameID, playerID, socket });
 
-            const master = new GameMaster(
+            const master = new Master(
               game,
               app.context.db,
               TransportAPI(gameID, socket, clientInfo, roomInfo),
