@@ -11,7 +11,7 @@ import Enzyme from 'enzyme';
 import Adapter from 'enzyme-adapter-react-16';
 import { Card } from './card';
 import { Deck } from './deck';
-import { UI, MoveCard, DropCard } from './ui';
+import { UI, GenID, MoveCard, DropCard } from './ui';
 
 Enzyme.configure({ adapter: new Adapter() });
 
@@ -79,6 +79,7 @@ describe('API', () => {
   };
 
   const state = {
+    _nextID: 1,
     _zIndex: 5,
 
     props: {
@@ -99,6 +100,7 @@ describe('API', () => {
 
   const move = MoveCard.bind(state);
   const drop = DropCard.bind(state);
+  const genID = GenID.bind(state);
 
   beforeEach(() => {
     state.props.sandboxMode = true;
@@ -134,5 +136,10 @@ describe('API', () => {
   test('drop card', () => {
     drop('cardA');
     expect(state.cards['cardA'].deckID).toBe(undefined);
+  });
+
+  test('genID', () => {
+    expect(genID()).toBe(1);
+    expect(state._nextID).toBe(2);
   });
 });

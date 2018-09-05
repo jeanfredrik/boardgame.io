@@ -12,6 +12,10 @@ import { Card } from './card';
 import { Deck } from './deck';
 import UIContext from './ui-context';
 
+export function GenID() {
+  return this._nextID++;
+}
+
 export function MoveCard(cardID, position) {
   if (!this.props.sandboxMode) {
     return;
@@ -70,7 +74,7 @@ class UI extends React.Component {
      * Used for generating ID's of elements in the subtree.
      * @private
      */
-    this._nextID = 0;
+    this._nextID = 1;
 
     /**
      * The zIndex of the most recently dragged card.
@@ -140,11 +144,9 @@ class UI extends React.Component {
   }
 
   getContext = () => {
-    const genID = () => ++this._nextID;
-
     return {
       sandboxMode: this.props.sandboxMode,
-      genID,
+      genID: GenID.bind(this),
       moveCard: MoveCard.bind(this),
       dropCard: DropCard.bind(this),
     };
