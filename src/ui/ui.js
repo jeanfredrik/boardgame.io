@@ -12,6 +12,44 @@ import { Card } from './card';
 import { Deck } from './deck';
 import UIContext from './ui-context';
 
+export function MoveCard(cardID, position) {
+  if (!this.props.sandboxMode) {
+    return;
+  }
+
+  this.cards[cardID].position = { ...position, zIndex: this._zIndex++ };
+  this.forceUpdate();
+}
+
+export function DropCard(cardID, deckID) {
+  if (!this.props.sandboxMode) {
+    return;
+  }
+
+  const card = this.cards[cardID];
+
+  // Remove card from any deck it was a part of.
+  if (card.deckID) {
+    const deck = this.decks[card.deckID];
+    deck.cards = deck.cards.filter(item => item != cardID);
+
+    if (deck.props.onRemove) {
+      const { id, data } = card.props;
+      deck.props.onRemove({ id, data });
+    }
+  }
+
+  card.deckID = deckID;
+
+  // Add card to new deck (if any).
+  if (deckID) {
+    const deck = this.decks[card.deckID];
+    deck.cards.push(cardID);
+  }
+
+  this.forceUpdate();
+}
+
 /**
  * Root element of the UI framework.
  */
@@ -102,51 +140,13 @@ class UI extends React.Component {
   }
 
   getContext = () => {
-    const moveCard = (cardID, position) => {
-      if (!this.props.sandboxMode) {
-        return;
-      }
-
-      this.cards[cardID].position = { ...position, zIndex: this._zIndex++ };
-      this.forceUpdate();
-    };
-
-    const dropCard = (cardID, deckID) => {
-      if (!this.props.sandboxMode) {
-        return;
-      }
-
-      const card = this.cards[cardID];
-
-      // Remove card from any deck it was a part of.
-      if (card.deckID) {
-        const deck = this.decks[card.deckID];
-        deck.cards = deck.cards.filter(item => item != cardID);
-
-        if (deck.props.onRemove) {
-          const { id, data } = card.props;
-          deck.props.onRemove({ id, data });
-        }
-      }
-
-      card.deckID = deckID;
-
-      // Add card to new deck (if any).
-      if (deckID) {
-        const deck = this.decks[card.deckID];
-        deck.cards.push(cardID);
-      }
-
-      this.forceUpdate();
-    };
-
     const genID = () => ++this._nextID;
 
     return {
       sandboxMode: this.props.sandboxMode,
       genID,
-      moveCard,
-      dropCard,
+      moveCard: MoveCard.bind(this),
+      dropCard: DropCard.bind(this),
     };
   };
 
