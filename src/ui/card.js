@@ -60,7 +60,7 @@ class CardImpl extends React.Component {
     const t = this.domRef.current;
 
     if (t) {
-      this.props.context.changeCardPosition(this.props.id, {
+      this.props.context.moveCard(this.props.id, {
         x: t.offsetLeft,
         y: t.offsetTop,
       });
